@@ -2,12 +2,12 @@ use std::f32::consts::FRAC_PI_2;
 
 use bevy::prelude::shape::{Capsule, Cube, Plane};
 use bevy::prelude::{
-    App, Assets, BuildChildren, Color, Commands, Component, GlobalTransform, Input, KeyCode, Mesh,
-    Mut, PbrBundle, PerspectiveCameraBundle, PointLight, PointLightBundle, Quat, Query, Res,
+    App, Assets, BuildChildren, Color, Commands, Component, GlobalTransform, Input, KeyCode, Mat3,
+    Mesh, Mut, PbrBundle, PerspectiveCameraBundle, PointLight, PointLightBundle, Quat, Query, Res,
     ResMut, StandardMaterial, Transform, Vec3, With,
 };
 use bevy::DefaultPlugins;
-use bevy_inspector_egui::WorldInspectorPlugin;
+use bevy_inspector_egui::{Inspectable, RegisterInspectable, WorldInspectorPlugin};
 
 fn main() {
     App::new()
@@ -16,14 +16,27 @@ fn main() {
         .add_startup_system(startup)
         .add_system(speed_control_system)
         .add_system(move_car_system)
+        .register_inspectable::<Velocity>()
         .run();
 }
 
 #[derive(Component)]
-struct PlayerCar;
+struct Player;
 
-#[derive(Component, Debug, Default)]
-struct Speed(f32);
+#[derive(Component, Debug, Inspectable)]
+struct Velocity {
+    speed: f32,
+    direction: Vec3,
+}
+
+impl Default for Velocity {
+    fn default() -> Self {
+        Self {
+            speed: 0.0,
+            direction: -Vec3::Z,
+        }
+    }
+}
 
 fn startup(
     mut commands: Commands,
@@ -36,12 +49,16 @@ fn startup(
         ..PbrBundle::default()
     });
 
-    commands.spawn_bundle(PbrBundle {
-        mesh: meshes.add(Mesh::from(Cube { size: 10.0 })),
-        material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-        transform: Transform::from_xyz(0.0, 5.0, 0.0),
-        ..PbrBundle::default()
-    });
+    for i in 0..10 {
+        for j in 0..10 {
+            commands.spawn_bundle(PbrBundle {
+                mesh: meshes.add(Mesh::from(Cube { size: 10.0 })),
+                material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
+                transform: Transform::from_xyz(100.0 * i as f32, 5.0, 50.0 * j as f32),
+                ..PbrBundle::default()
+            });
+        }
+    }
 
     commands.spawn_bundle(PointLightBundle {
         point_light: PointLight {
@@ -55,13 +72,14 @@ fn startup(
 
     commands
         .spawn()
-        .insert(PlayerCar)
+        .insert(Player)
         .insert(Transform::from_xyz(-20.0, 0.0, 50.0))
         .insert(GlobalTransform::default())
-        .insert(Speed::default())
+        .insert(Velocity::default())
         .with_children(|children| {
             children.spawn_bundle(PerspectiveCameraBundle {
-                transform: Transform::from_xyz(0.0, 10.0, 25.0).looking_at(Vec3::ZERO, Vec3::Y),
+                transform: Transform::from_xyz(0.0, 7.0, 25.0)
+                    .looking_at(Vec3::new(0.0, 2.0, 0.0), Vec3::Y),
                 ..PerspectiveCameraBundle::default()
             });
 
@@ -79,22 +97,31 @@ fn startup(
         });
 }
 
-fn speed_control_system(input: Res<Input<KeyCode>>, mut query: Query<&mut Speed, With<PlayerCar>>) {
-    let mut player_speed = query.single_mut();
+fn speed_control_system(input: Res<Input<KeyCode>>, mut query: Query<&mut Velocity, With<Player>>) {
+    let mut velocity = query.single_mut();
 
     if input.pressed(KeyCode::Up) {
-        player_speed.0 += 0.01;
+        velocity.speed += 0.01;
     } else if input.pressed(KeyCode::Down) {
-        player_speed.0 -= 0.01;
-    } else if player_speed.0 > 0. {
-        player_speed.0 -= 0.005;
+        velocity.speed -= 0.01;
+    } else if velocity.speed > 0.0 {
+        velocity.speed -= 0.005;
     } else {
-        player_speed.0 += 0.005;
+        velocity.speed += 0.005;
+    }
+
+    if input.pressed(KeyCode::Left) {
+        velocity.direction = Mat3::from_rotation_y(0.02) * velocity.direction;
+    }
+
+    if input.pressed(KeyCode::Right) {
+        velocity.direction = Mat3::from_rotation_y(-0.02) * velocity.direction;
     }
 }
 
-fn move_car_system(_input: Res<Input<KeyCode>>, mut query: Query<(&mut Transform, &Speed)>) {
-    let (mut transform, speed): (Mut<Transform>, &Speed) = query.single_mut();
+fn move_car_system(mut query: Query<(&mut Transform, &Velocity)>) {
+    let (mut transform, velocity): (Mut<Transform>, &Velocity) = query.single_mut();
 
-    transform.translation.z -= speed.0;
+    transform.translation += velocity.speed * velocity.direction;
+    transform.rotation = Quat::from_rotation_arc(-Vec3::Z, velocity.direction);
 }
